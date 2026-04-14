@@ -1,0 +1,20 @@
+﻿# Зависимости и сборка
+node_modules/
+dist/
+build/
+
+# Окружение и секреты
+.env
+.env.local
+.env.*.local
+
+# Логи и временные файлы
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
