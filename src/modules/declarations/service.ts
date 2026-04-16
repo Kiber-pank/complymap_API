@@ -63,14 +63,28 @@ export async function getDeclarations(params: declarationQueryParams) {
     }
   }
 
+  // Формируем список выбираемых полей динамически, только для реально подключенных JOIN-ов
+  const selectedFields = [
+    'd.id', 'd.card_id', 'd.decl_number', 'd.decl_reg_date', 'd.decl_end_date',
+    'd.applicant_inn', 'd.manufacturer_inn', 'd.sync_status', 'd.updated_at'
+  ]
+
+  if (joinClauses.some(j => j.includes('dict_statuses'))) {
+    selectedFields.push('ds.name as status_name');
+  }
+  if (joinClauses.some(j => j.includes('dict_doc_type'))) {
+    selectedFields.push('dt.name as doc_type_name');
+  }
+  if (joinClauses.some(j => j.includes('dict_oksm'))) {
+    selectedFields.push('ds.name as country_name');
+  }
+
   // Оконная функция COUNT(*) OVER() возвращает общее количество записей,
   // удовлетворяющих условию WHERE, без необходимости выполнять второй запрос.
   // Алиасы ds.name, dt.name, ok.name добавляются динамически, если запрошены JOIN-ы.
   const sql = `
     SELECT
-      d.id, d.card_id, d.decl_number, d.decl_reg_date, d.decl_end_date,
-      d.applicant_inn, d.manufacturer_inn, d.sync_status, d.updated_at,
-      ${joinClauses.length > 0 ? 'ds.name as status_name, dt.name as doc_type_name, ok.name as country_name,' : ''}
+      ${selectedFields.join(', ')},
       COUNT(*) OVER() AS total_count
     FROM declarations_full d
     ${joinClauses.join(' ')}

@@ -9,7 +9,7 @@ import { request } from 'node:http';
 export async function declarationsRoutes(fastify: FastifyInstance) {
   // fastify.get принимает три аргумента: путь, конфигурация (включая схему), обработчик
   fastify.get(
-    '/api/declarations',
+    '/declarations',
     {
       schema: {
         // Указываем Zod-схему для querystring. Fastify передаст её в наш кастомный компилятор.
