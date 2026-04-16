@@ -11,7 +11,7 @@ const ALLOWED_JOINS = new Map<string,string>([
 ]);
 
 export async function getDeclarations(params: declarationQueryParams) {
-  const {limit, offset, sort_by, sort_order} = params;
+  const {limit, cursor, sort_order} = params;
   const conditions: string[] = [];
   const values: any[] = [];
 
@@ -51,6 +51,18 @@ export async function getDeclarations(params: declarationQueryParams) {
     }
   }
 
+  // Логика курсорной пагинации.
+  // Курсор работает по принципу "верни записи строго после (или до) указанного ID".
+  // Оператор сравнения зависит от направления сортировки.
+  if (cursor !== undefined) {
+    values.push(cursor);
+    if (sort_order === 'ASC') {
+      conditions.push(`d.id > $${values.length}`);
+    } else {
+      conditions.push(`d.id < $${values.length}`);
+    }
+  }
+
   // Формируем строку WHERE. Если условий нет, она останется пустой.
   const whereClause = conditions.length? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -85,26 +97,33 @@ export async function getDeclarations(params: declarationQueryParams) {
   // Алиасы ds.name, dt.name, ok.name добавляются динамически, если запрошены JOIN-ы.
   const sql = `
     SELECT
-      ${selectedFields.join(', ')},
-      COUNT(*) OVER() AS total_count
+      ${selectedFields.join(', ')}
     FROM declarations_full d
     ${joinClauses.join(' ')}
     ${whereClause}
-    ORDER BY d.${sort_by} ${sort_order}
-    LIMIT $${values.length + 1} OFFSET $${values.length + 2}
+    ORDER BY d.id ${sort_order}
+    LIMIT $${values.length + 1}
   `;
 
   // Выполняем запрос. Библиотека pg автоматически экранирует параметры.
-  const result = await pool.query(sql, [...values, limit, offset]);
+  const result = await pool.query(sql, [...values, limit + 1]);
 
-  // Извлекаем общее количество из первой строки
-  const total = result.rows[0] ? Number(result.rows[0]?.total_count) : 0 ;
+  // Определяем наличие следующей страницы
+  const hasMore = result.rows.length > limit;
+  if (hasMore) {
+    // Удаляем лишнюю запись. Она вернулась только для установки флага hasMore.
+    result.rows.pop();
+  }
 
-  // Удаляем служебное поле total_count из каждой записи перед отправкой клиенту
+  // Формируем курсор для следующего запроса.
+  // Курсор равен ID последней записи в текущем ответе.
+  const nextCursor = result.rows.length > 0 ? result.rows[result.rows.length - 1].id : null;
+
+  // Возвращаем данные без служебных полей
   const data = result.rows.map((row) => {
-    const {total_count, ...rest} = row;
+    const { ...rest } = row;
     return rest;
   });
 
-  return { data, total, limit, offset };
+  return { data, nextCursor, hasMore, limit };
 }

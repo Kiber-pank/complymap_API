@@ -1,8 +1,8 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { declarationQueryParams, declarationQuerySchema } from './schema';
+import { z } from 'zod';
+import { declarationQuerySchema } from './schema';
 import { getDeclarations } from './service';
-import { request } from 'node:http';
-import { object } from 'zod';
+
 
 // Плагин, содержащий маршруты для работы с декларациями.
 // В Fastify каждый набор маршрутов оборачивается в функцию, принимающую экземпляр сервера.
@@ -27,19 +27,20 @@ export async function declarationsRoutes(fastify: FastifyInstance) {
                 type: 'array',
                 items: { type: 'object', additionalProperties: true}
               },
-              total: {type: 'number'},
-              limit: {type: 'number'},
-              offset: {type: 'number'}
+              nextCursor: {type: ['number', 'null']},
+              hasMore: { type: 'boolean'},
+              limit: {type: 'number'}
             }
           }
         }
       }
     },
     async (
-      request: FastifyRequest<{Querystring: declarationQueryParams}>,
+      request: FastifyRequest<{Querystring: z.infer<typeof declarationQuerySchema>}>,
       reply: FastifyReply
     ) => {
       const result = await getDeclarations(request.query);
+      console.log("result.data: ", result.data);
       return reply.send(result);
     }
   );

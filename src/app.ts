@@ -24,7 +24,7 @@ export async function buildApp() {
     // TypeScript требует, чтобы компилятор всегда возвращал функцию.
     // Для маршрутов без Zod эта функция просто пропустит данные без проверки.
     if (!(schema instanceof z.ZodType)){
-      return (data: any) => ({value: data})
+      return (data: any) => ({value: data});
     };
 
     // Возвращаем функцию-валидатор, которую Fastify будет вызывать для каждого запроса
