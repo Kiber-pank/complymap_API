@@ -51,6 +51,7 @@ export async function getDeclarations(params: declarationQueryParams) {
     }
   }
 
+  // Формируем строку WHERE. Если условий нет, она останется пустой.
   const whereClause = conditions.length? `WHERE ${conditions.join(' AND ')}` : '';
 
   // Собираем JOIN-ы только из разрешенного списка
@@ -97,7 +98,7 @@ export async function getDeclarations(params: declarationQueryParams) {
   const result = await pool.query(sql, [...values, limit, offset]);
 
   // Извлекаем общее количество из первой строки
-  const total = Number(result.rows[0]?.total_count || 0);
+  const total = result.rows[0] ? Number(result.rows[0]?.total_count) : 0 ;
 
   // Удаляем служебное поле total_count из каждой записи перед отправкой клиенту
   const data = result.rows.map((row) => {

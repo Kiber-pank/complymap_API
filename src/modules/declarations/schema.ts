@@ -15,12 +15,12 @@ export const declarationQuerySchema = z.object({
   manufacturer_inn: z.string().optional(),
 
   // Фильтры по числам (связанные справочники)
-  status_id: z.coerce.number().optional(),
-  doc_type_id: z.coerce.number().optional(),
+  status_id: z.coerce.number().int().optional(),
+  doc_type_id: z.coerce.number().int().optional(),
 
   // Фильтры по диапазону дат
-  reg_date_from: z.string().date().optional(),
-  reg_date_to: z.string().date().optional(),
+  reg_date_from: z.iso.date().optional(),
+  reg_date_to: z.iso.date().optional(),
 
   // Массив ID ТН ВЭД: придет как строка "123,456,789". Распарсим в сервисе.
   tnved_ids: z.string().optional(),
