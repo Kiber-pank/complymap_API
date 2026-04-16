@@ -4,6 +4,7 @@ import swagger from '@fastify/swagger';
 import swaggerUI from '@fastify/swagger-ui';
 import rateLimit from '@fastify/rate-limit';
 
+import { z } from 'zod';
 import { healthRoutes } from './routes/healt';
 import { declarationsRoutes } from './modules/declarations/routes';
 import { globalErrorHandler } from './plugins/error-handler';
@@ -16,6 +17,29 @@ export async function buildApp() {
   // logger: true включает встроенный логгер (pino). В продакшене его можно настроить на JSON-вывод.
   const fastify = Fastify({ logger: true });
   
+  // Регистрируем кастомный валидатор для Zod-схем.
+  // Fastify вызывает эту функцию при регистрации каждого роута.
+  fastify.setValidatorCompiler(({schema}) => {
+    // Если схема не является экземпляром Zod, возвращаем функцию-заглушку.
+    // TypeScript требует, чтобы компилятор всегда возвращал функцию.
+    // Для маршрутов без Zod эта функция просто пропустит данные без проверки.
+    if (!(schema instanceof z.ZodType)){
+      return (data: any) => ({value: data})
+    };
+
+    // Возвращаем функцию-валидатор, которую Fastify будет вызывать для каждого запроса
+    return (data: any) => {
+      const res = schema.safeParse(data);
+      if (res.success) return { value: res.data };
+      
+      // Форматируем ошибки Zod в единый формат для глобального обработчика ошибок
+      const errorMessage = res.error.issues
+        .map((e) => `${e.path.join('.')}: ${e.message}`)
+        .join(', ');
+      return { error: new Error(errorMessage) };
+    };
+  });
+
   // Порядок регистрации плагинов важен.
   // Сначала регистрируем обработчик ошибок, чтобы он мог перехватывать исключения из всех последующих плагинов.
   await fastify.register(globalErrorHandler);
