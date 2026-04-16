@@ -9,7 +9,7 @@ export const declarationQuerySchema = z.object({
   // Курсор принимает ID последней записи, которую клиент получил на предыдущем шаге.
   // При первом запросе параметр отсутствует, сервер вернёт самые свежие записи.
   cursor: z.coerce.number().int().positive().optional(),
-  
+
   // Сортировка: разрешаем только явно указанные поля (защита от инъекций в ORDER BY)
   //sort_by: z.enum(['id', 'decl_number', 'decl_reg_date', 'update_at']).default('id'),
   sort_order: z.enum(['ASC', 'DESC']).default('DESC'),
@@ -19,8 +19,8 @@ export const declarationQuerySchema = z.object({
   manufacturer_inn: z.string().optional(),
 
   // Фильтры по числам (связанные справочники)
-  status_id: z.coerce.number().int().optional(),
-  doc_type_id: z.coerce.number().int().optional(),
+  status_id: z.coerce.number().optional(),
+  doc_type_id: z.coerce.number().optional(),
 
   // Фильтры по диапазону дат
   reg_date_from: z.iso.date().optional(),
