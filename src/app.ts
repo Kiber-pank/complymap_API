@@ -1,85 +1,75 @@
-import Fastify, { FastifySchemaCompiler, FastifySchema } from 'fastify';
-import cors from '@fastify/cors';
-import swagger from '@fastify/swagger';
-import swaggerUI from '@fastify/swagger-ui';
-import rateLimit from '@fastify/rate-limit';
-
-import { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { healthRoutes } from './routes/healt';
+import Fastify, { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { config } from './config/env';
+import { errorHandlerPlugin } from './middleware/error-handler';
+import { requestIdPlugin } from './middleware/request_id';
 import { declarationsRoutes } from './modules/declarations/routes';
-import { globalErrorHandler } from './plugins/error-handler';
+import { certificatesRoutes } from './modules/certificates/routes';
+import { checkDbHealth } from './config/db';
 
-// Экспортируем фабричную функцию для создания приложения.
-// Это позволяет легко тестировать сервер, не запуская реальный HTTP-порт.
-export async function buildApp() {
+/**
+ * Создаёт и конфигурирует экземпляр Fastify.
+ * 
+ * КОНЦЕПЦИИ FASTIFY:
+ * 1. Порядок регистрации: хуки и декораторы (errorHandler, requestId) регистрируются 
+ *    ДО маршрутов, чтобы они успели прикрепиться к контексту запроса.
+ * 2. Инкапсуляция: каждый fastify.register() создаёт изолированный контекст. 
+ *    Маршруты модулей не пересекаются и не делят состояния.
+ * 3. trustProxy: true необходим при работе за nginx/reverse-proxy для корректного
+ *    определения request.ip и заголовков X-Forwarded-*.
+ */
+export async function buildApp(): Promise<FastifyInstance> {
+  const app = Fastify({
+    logger: {
+      level: config.LOG_LEVEL
+    },
+    disableRequestLogging: false,
+    trustProxy: true, // Важно для production-развёртывания
+  });
 
-  // Создаём базовый экземпляр Fastify.
-  // logger: true включает встроенный логгер (pino). В продакшене его можно настроить на JSON-вывод.
-  const fastify = Fastify({ logger: true });
+  // Глобальные плагины
+  await app.register(errorHandlerPlugin);
+  await app.register(requestIdPlugin);
 
-  // Порядок регистрации плагинов важен.
-  // Сначала регистрируем обработчик ошибок, чтобы он мог перехватывать исключения из всех последующих плагинов.
-  await fastify.register(globalErrorHandler);
+  // Rate Limiting Prep (In-Memory для single-node)
+  // В production при кластеризации рекомендуется вынести в Redis.
+  const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+  const RATE_LIMIT_WINDOW_MS = 60000; // 1 минута
+  const RATE_LIMIT_MAX = 120; // 120 запросов в минуту с одного IP
 
-  // Регистрируем плагин ограничения частоты запросов (Rate Limiting).
-  // Защищает сервер от DDoS и исчерпания ресурсов пула подключений к базе данных.
-  await fastify.register(rateLimit, {
-    max: 100,                //максимум запросов
-    timeWindow: '1 minute', //за какой период
-    keyGenerator: (req) => req.ip, // для авторизовыанных клиентов  req.headers['x_api-key']
-    errorResponseBuilder: (req, context) => ({
-      error: {
-        code: 'RATE_LIMIT_EXCEEDED',
-        message: `Too many request. Retly after ${Math.ceil(context.ttl / 1000)}s`,
-        limit: context.max,
-        remaining: 0
+  app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+    const ip = request.ip || 'unknown';
+    const now = Date.now();
+    const client = rateLimitStore.get(ip);
+
+    if (client && now < client.resetAt) {
+      client.count++;
+      if (client.count > RATE_LIMIT_MAX) {
+        reply.header('Retry-After', Math.ceil((client.resetAt - now) / 1000));
+        return reply.status(429).send({ error: 'TooManyRequests', message: 'Превышен лимит запросов', statusCode: 429 });
       }
-    }),
-
-    // Добавляем HTTP-заголовки в каждый ответ, чтобы клиент видел свой текущий лимит.
-    addHeadersOnExceeding: {
-      "x-ratelimit-limit": true,
-      "x-ratelimit-remaining": true,
-      "x-ratelimit-reset": true
+    } else {
+      rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
     }
-  })
-
-  // Регистрируем маршрут проверки работоспособности сервиса.
-  await fastify.register(healthRoutes);
-
-  // Включаем CORS (Cross-Origin Resource Sharing).
-  // origin: true разрешает запросы с любых доменов. В продакшене следует указать конкретные домены фронтенда.
-  await fastify.register(cors, { origin: true });
-
-  // Регистрируем генератор OpenAPI-спецификации
-  // Здесь передаются только настройки самой спецификации (информация об API, версии, серверы и т.д.)
-  await fastify.register(swagger, {
-    openapi: {
-      info: {
-        title: 'complymap API',
-        description: 'API для работы с реестрами деклараций и сертификатов',
-        version: '0.1.0'
-      },
-      servers: [{ url: `http://localhost:${process.env.PORT || 3000}` }]
-    },
   });
 
-  // Регистрируем Swagger UI для отображения документации
-  // exposeRoute: true — делает спецификацию доступной по /documentation/json и включает UI в продакшене
-  // В реальном продакшене лучше вынести это в переменную окружения и включать только для staging/dev
-  await fastify.register(swaggerUI, {
-    routePrefix: '/docs', // URL, по которому будет доступен Swagger UI
-    uiConfig: {
-      docExpansion: 'list',
-      deepLinking: false,
-    },
+  // Health Check эндпоинт
+  app.get(
+    '/health',
+    { logLevel: 'warn', schema: { response: { 200: { type: 'object', properties: { status: { type: 'string' }, db: { type: 'boolean' } } } } } },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const dbOk = await checkDbHealth();
+      return reply.status(dbOk ? 200 : 503).send({ status: dbOk ? 'ok' : 'degraded', db: dbOk });
+    }
+  );
+
+  // Регистрация доменных маршрутов
+  await app.register(declarationsRoutes);
+  await app.register(certificatesRoutes);
+
+  // Graceful Shutdown хук
+  app.addHook('onClose', async (instance: FastifyInstance) => {
+    instance.log.info('Завершение работы Fastify, очистка внутренних состояний...');
   });
 
-  // Регистрируем маршруты бизнес-логики.
-  // prefix: '/api' добавляет префикс ко всем путям внутри этого плагина.
-  // Например, маршрут '/declarations' станет доступен по адресу '/api/declarations'.
-  fastify.register(declarationsRoutes, { prefix: '/api' });
-
-  // Возвращаем готовый экземпляр приложения для запуска в server.ts.
-  return fastify;
+  return app;
 }

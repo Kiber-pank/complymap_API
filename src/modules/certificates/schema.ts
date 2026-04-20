@@ -27,31 +27,30 @@ const parseCsvFields = z.preprocess(
 );
 
 /**
- * Строгая схема валидации query-параметров для /api/v1/declarations.
- * Все поля опциональны, кроме `cursor` и `limit` (имеют дефолты).
- * Соответствует allowlist-конфигурации в QueryBuilder.
+ * Схема валидации запросов к /api/v1/certificates.
+ * Оптимизирована под индексы таблицы sertificats_full и GIN-операторы массивов.
  */
-export const declarationsQuerySchema = z.object({
+export const certificatesQuerySchema = z.object({
   cursor: z.string().optional().describe('Base64-строка курсора для пагинации'),
   limit: z.coerce.number().int().min(1).max(100).default(20).describe('Количество записей на странице'),
-  sort: z.enum(['updated_at', 'decl_reg_date', 'decl_end_date', 'decl_number']).default('updated_at'),
+  sort: z.enum(['updated_at', 'cert_reg_date', 'cert_end_date', 'cert_number']).default('updated_at'),
   direction: z.enum(['ASC', 'DESC']).default('DESC'),
-  
-  // Скалярные фильтры
+
+  // Скалярные фильтры (B-Tree индексы)
   status_id: z.coerce.number().int().positive().optional(),
   applicant_inn: z.string().regex(/^\d{10,12}$/, 'INN должен содержать 10 или 12 цифр').optional(),
   manufacturer_inn: z.string().regex(/^\d{10,12}$/, 'INN должен содержать 10 или 12 цифр').optional(),
-  decl_number: z.string().max(100).optional(),
+  cert_number: z.string().max(100).optional(),
   sync_status: z.enum(['success', 'not_found', 'error']).optional(),
   doc_type_id: z.coerce.number().int().positive().optional(),
   product_origin_id: z.string().max(20).optional(),
   applicant_type_id: z.coerce.number().int().positive().optional(),
-  
-  // Диапазоны дат (коэрцитивно приводятся к Date или отклоняются)
-  decl_reg_date_from: z.coerce.date().optional(),
-  decl_reg_date_to: z.coerce.date().optional(),
-  
-  // Массивные фильтры (используют GIN-индексы и оператор &&)
+
+  // Диапазоны дат
+  cert_reg_date_from: z.coerce.date().optional(),
+  cert_reg_date_to: z.coerce.date().optional(),
+
+  // Массивные фильтры (GIN-индексы, оператор &&)
   tnved_ids: parseIntArray.optional(),
   tech_reg_ids: parseIntArray.optional(),
   groups_id: parseIntArray.optional(),
@@ -59,4 +58,4 @@ export const declarationsQuerySchema = z.object({
   fields: parseCsvFields.optional().describe('Список возвращаемых полей через запятую (пример: id,decl_number,status_name)'),
 });
 
-export type DeclarationsQuery = z.infer<typeof declarationsQuerySchema>;
+export type CertificatesQuery = z.infer<typeof certificatesQuerySchema>;
