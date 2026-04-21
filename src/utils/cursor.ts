@@ -69,29 +69,55 @@ export function decodeCursor(cursor: string): { updated_at: string; id: number }
 /**
  * Вспомогательная функция для формирования пагинированного ответа.
  * 
- * ТИПИЗАЦИЯ:
- * Мы используем constraint `T extends { updated_at: string | Date; id: number }`,
- * чтобы TypeScript гарантировал наличие полей курсора на уровне компиляции.
- * Это исключает небезопасные приведения `as unknown` и соответствует строгим принципам.
+ *  * Добавлен параметр `requestedFields`, чтобы корректно фильтровать ответ,
+ * но при этом всегда формировать курсор из полных данных (с updated_at/id).
  * 
  * @param items - Результат запроса (должен быть длиной `limit + 1` для проверки `has_more`)
  * @param limit - Запрошенный лимит записей
+ * @param requestedFields - Опциональный список полей, запрошенных клиентом (?fields=...)
  */
-export function buildCursorResponse<T extends { updated_at: string | Date; id: number }>(
+export function buildCursorResponse<T extends Record<string, unknown>>(
   items: T[],
-  limit: number
+  limit: number,
+  requestedFields?: string[]
 ): CursorResponse<T> {
   const hasMore = items.length > limit;
+  let next_cursor: string | null = null;
 
+  // 🛡️ Формируем курсор ВСЕГДА из полных данных (даже если клиент не запрашивал эти поля)
+  // Это возможно, потому что в сервисе мы принудительно добавляем updated_at/id в SELECT
   if (hasMore) {
-    // При стратегии LIMIT + 1 лишняя запись находится по индексу `limit` (0-based)
     const cursorItem = items[limit];
-    const next_cursor = encodeCursor(cursorItem.updated_at, cursorItem.id);
     
-    // Возвращаем ровно `limit` записей, отбрасывая курсорный элемент
-    return { data: items.slice(0, limit), next_cursor, has_more: true };
+    // Безопасное извлечение полей курсора с проверкой типов
+    const updatedAt = cursorItem['updated_at'];
+    const id = cursorItem['id'];
+    
+    if (updatedAt && id) {
+      next_cursor = encodeCursor(
+        updatedAt instanceof Date ? updatedAt.toISOString() : String(updatedAt),
+        typeof id === 'number' ? id : Number(id)
+      );
+    }
   }
 
-  // Дополнительных записей нет
-  return { data: items, next_cursor: null, has_more: false };
+  // 🧹 Если клиент запросил конкретные поля, фильтруем ответ
+  // (но курсор уже сформирован из полных данных выше)
+  const data = requestedFields && requestedFields.length > 0
+    ? items.slice(0, limit).map(row => {
+        const filtered: Record<string, unknown> = {};
+        for (const field of requestedFields) {
+          if (field in row) {
+            filtered[field] = row[field];
+          }
+        }
+        return filtered as T;
+      })
+    : items.slice(0, limit) as T[];
+
+  return {
+    data,
+    next_cursor,
+    has_more: hasMore,
+  };
 }

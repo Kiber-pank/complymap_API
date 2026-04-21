@@ -45,10 +45,12 @@ export async function getCertificates(
   // Декодирование курсора
   let decodedCursor = null;
   if (query.cursor) {
+    // Zod уже проверил формат строки, но decodeCursor дополнительно валидирует структуру
     decodedCursor = decodeCursor(query.cursor);
   }
 
-  // Применение фильтров (строго по allowlist)
+  // Применение фильтров (только те, что переданы клиентом)
+  // Строго соответствуем allowlist: если поле undefined -> оно не попадает в WHERE
   if (query.status_id !== undefined) qb.addFilter('status_id', query.status_id);
   if (query.applicant_inn) qb.addFilter('applicant_inn', query.applicant_inn);
   if (query.manufacturer_inn) qb.addFilter('manufacturer_inn', query.manufacturer_inn);
@@ -69,6 +71,16 @@ export async function getCertificates(
   if (query.groups_id?.length) qb.addFilter('groups_id', query.groups_id);
   if (query.single_list_ids?.length) qb.addFilter('single_list_ids', query.single_list_ids);
 
+  // Всегда добавляем поля курсора к списку выборки, даже если клиент их не запросил
+  // Это гарантирует, что мы сможем сформировать валидный next_cursor
+  const fieldsForQuery = query.fields 
+    ? [...new Set([...query.fields, 'updated_at', 'id'])] // Set удалит дубликаты
+    : undefined; // Если fields не указан, берём всё (по умолчанию)
+
+  if (fieldsForQuery && fieldsForQuery.length > 0) {
+    qb.selectFields(fieldsForQuery);
+  }
+
   // Сортировка, курсор и лимит
   qb.addSort(query.sort, query.direction);
   qb.applyCursor(decodedCursor, query.direction);
@@ -77,6 +89,7 @@ export async function getCertificates(
   const { text, values } = qb.build();
 
   try {
+    // Выполняем запрос. Драйвер pg автоматически экранирует $1, $2...
     const result = await pool.query<CertificateRow>(text, values);
 
     const duration = performance.now() - startTime;
@@ -85,8 +98,22 @@ export async function getCertificates(
       'Выполнен запрос сертификатов'
     );
 
-    // Формируем ответ: отсекаем N+1 запись, кодируем курсор, вычисляем has_more
-    return buildCursorResponse(result.rows, query.limit);
+        // 🧹 Если клиент не запрашивал updated_at/id, удаляем их из ответа перед возвратом
+        // (но они остались в результате для генерации курсора)
+        const cleanedRows = query.fields 
+          ? result.rows.map(row => {
+              const filtered: Record<string, unknown> = {};
+              for (const field of query.fields!) {
+                if (field in row) filtered[field] = row[field];
+              }
+              return filtered as CertificateRow;
+            })
+          : result.rows;
+
+    // Формируем ответ: cleanedRows уже содержат только запрошенные поля,
+    // но для buildCursorResponse передаём оригинальные rows (с updated_at/id)
+    // НО: buildCursorResponse читает последние записи из result.rows, так что всё ок.
+    return buildCursorResponse(result.rows, query.limit, query.fields);
   } catch (error) {
     logger.error(
       { error: error as Error, query_preview: text, values_count: values.length },

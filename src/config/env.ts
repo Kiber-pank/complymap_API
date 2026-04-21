@@ -18,7 +18,14 @@ const envSchema = z.object({
 
   // Параметры пула соединений
   DB_MAX_CONNECTIONS: z.coerce.number().int().min(1).max(100).default(20),
-  DB_IDLE_TIMEOUT_MS: z.coerce.number().int().min(0).default(10000)
+  DB_IDLE_TIMEOUT_MS: z.coerce.number().int().min(0).default(10000),
+
+  // ✅ КОНФИГУРАЦИЯ SWAGGER (добавлено)
+  SWAGGER_ENABLED: z.coerce.boolean().default(false),
+  SWAGGER_ROUTE_PREFIX: z.string().default('/documentation'),
+  SWAGGER_PROTECT: z.coerce.boolean().default(true),
+  SWAGGER_USERNAME: z.string().optional(),
+  SWAGGER_PASSWORD: z.string().optional(),
 });
 
 /** Типизированный интерфейс конфигурации, автоматически выведенный из Zod */

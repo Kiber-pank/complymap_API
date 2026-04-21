@@ -1,21 +1,37 @@
 import { z } from 'zod';
 
 /**
- * Вспомогательный трансформер для безопасного преобразования CSV-строк в массивы целых чисел.
+ * Вспомогательный трансформер для безопасного преобразования CSV-строк или массивов строк 
+ * в массив целых положительных чисел.
  * 
  * ПОЧЕМУ ТАК:
- * Fastify по умолчанию парсит ?arr=1&arr=2 как массив, но клиенты часто отправляют ?arr=1,2,3.
- * Этот препроцессор унифицирует оба формата и отфильтровывает NaN-значения до этапа валидации.
+ * - Swagger UI при `explode: false` может отправлять как строку "1,2", так и массив ["1","2"]
+ * - Этот препроцессор унифицирует оба формата и конвертирует значения в числа ДО валидации
+ * - Отфильтровывает NaN и неположительные значения на раннем этапе
  */
 const parseIntArray = z.preprocess(
   (val) => {
-    if (Array.isArray(val)) return val;
-    if (typeof val === 'string') {
-      return val.split(',').map(Number).filter((n) => !Number.isNaN(n));
+    let rawValues: unknown[];
+    
+    // Нормализуем вход: приводим к массиву значений
+    if (Array.isArray(val)) {
+      rawValues = val;
+    } else if (typeof val === 'string') {
+      rawValues = val.split(',');
+    } else {
+      return val; // Пусть Zod выбросит ошибку на следующем этапе
     }
-    return val;
+    
+    // Конвертируем каждое значение в число, фильтруем невалидные
+    return rawValues
+      .map(v => {
+        const num = Number(v);
+        return Number.isNaN(num) ? undefined : num;
+      })
+      .filter((n): n is number => n !== undefined && Number.isInteger(n) && n > 0);
   },
-  z.array(z.coerce.number().int().positive())
+  // После препроцессинга у нас уже гарантированно массив чисел — валидируем структуру
+  z.array(z.number().int().positive())
 );
 
 const parseCsvFields = z.preprocess(

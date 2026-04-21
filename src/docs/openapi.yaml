@@ -1,0 +1,271 @@
+openapi: 3.0.3
+info:
+  title: ComplyMap API
+  description: |
+    Публичный REST API для реестров деклараций и сертификатов соответствия.
+    
+    ## Основные возможности
+    - Курсорная пагинация (без offset/limit)
+    - Динамическая фильтрация и сортировка
+    - Проекция полей (?fields=...) с авто-JOIN справочников
+    - Поддержка массивов через оператор пересечения (&&)
+  version: 1.0.0
+  contact:
+    email: support@complymap.com
+
+servers:
+  - url: http://localhost:3000
+    description: Development
+  - url: https://api.complymap.com
+    description: Production
+
+tags:
+  - name: declarations
+    description: Реестр деклараций соответствия
+  - name: certificates
+    description: Реестр сертификатов соответствия
+
+paths:
+  /api/v1/declarations:
+    get:
+      tags: [declarations]
+      summary: Получить список деклараций
+      description: Возвращает пагинированный список деклараций с поддержкой фильтрации и проекции полей.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: Количество записей на странице (макс. 100)
+        - name: cursor
+          in: query
+          schema: { type: string }
+          description: Base64-строка курсора для навигации
+        - name: sort
+          in: query
+          schema: { type: string, enum: [updated_at, decl_reg_date, decl_end_date, decl_number], default: updated_at }
+          description: Поле для сортировки
+        - name: direction
+          in: query
+          schema: { type: string, enum: [ASC, DESC], default: DESC }
+          description: Направление сортировки
+        - name: status_id
+          in: query
+          schema: { type: integer }
+        - name: applicant_inn
+          in: query
+          schema: { type: string, pattern: '^\d{10,12}$' }
+        - name: manufacturer_inn
+          in: query
+          schema: { type: string, pattern: '^\d{10,12}$' }
+        - name: decl_number
+          in: query
+          schema: { type: string }
+          description: Номер декларации (частичное совпадение)
+        - name: sync_status
+          in: query
+          schema: { type: string, enum: [success, not_found, error] }
+        - name: decl_reg_date_from
+          in: query
+          schema: { type: string, format: date }
+        - name: decl_reg_date_to
+          in: query
+          schema: { type: string, format: date }
+        - name: tnved_ids
+          in: query
+          schema: { type: array, items: { type: integer } }
+          style: form
+          explode: false
+          description: Массив ID ТН ВЭД (поиск по пересечению &&)
+        - name: tech_reg_ids
+          in: query
+          schema: { type: array, items: { type: integer } }
+          style: form
+          explode: false
+        - name: fields
+          in: query
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: false
+          description: Список возвращаемых полей
+      responses:
+        '200':
+          description: Успешный ответ с курсорной пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CursorResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/certificates:
+    get:
+      tags: [certificates]
+      summary: Получить список сертификатов
+      description: Зеркальный эндпоинт для реестра сертификатов.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [updated_at, cert_reg_date, cert_end_date, cert_number], default: updated_at }
+        - name: direction
+          in: query
+          schema: { type: string, enum: [ASC, DESC], default: DESC }
+        - name: status_id
+          in: query
+          schema: { type: integer }
+        - name: applicant_inn
+          in: query
+          schema: { type: string, pattern: '^\d{10,12}$' }
+        - name: cert_number
+          in: query
+          schema: { type: string }
+          description: Номер сертификата (частичное совпадение)
+        - name: cert_reg_date_from
+          in: query
+          schema: { type: string, format: date }
+        - name: cert_reg_date_to
+          in: query
+          schema: { type: string, format: date }
+        - name: tnved_ids
+          in: query
+          schema: { type: array, items: { type: integer } }
+          style: form
+          explode: false
+        - name: fields
+          in: query
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: false
+      responses:
+        '200':
+          description: Успешный ответ с курсорной пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CursorResponseCert'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+components:
+  schemas:
+    CursorResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Declaration'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Курсор для следующей страницы
+        has_more:
+          type: boolean
+          description: Флаг наличия дополнительных записей
+      required: [data, next_cursor, has_more]
+
+    CursorResponseCert:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Certificate'
+        next_cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+      required: [data, next_cursor, has_more]
+
+    Declaration:
+      type: object
+      properties:
+        id: { type: integer, example: 1859164 }
+        card_id: { type: string, nullable: true, example: "21334152" }
+        category: { type: string, example: "declarations" }
+        decl_number: { type: string, nullable: true, example: "РОСС RU Д-RU.РА01.В.11940/26" }
+        decl_reg_date: { type: string, format: date-time, nullable: true }
+        decl_end_date: { type: string, format: date-time, nullable: true }
+        applicant_inn: { type: string, nullable: true, example: "0278982776" }
+        manufacturer_inn: { type: string, nullable: true }
+        status_id: { type: integer, nullable: true, example: 6 }
+        doc_type_id: { type: integer, nullable: true }
+        product_origin_id: { type: string, nullable: true, example: "643" }
+        tnved_ids:
+          type: array
+          items: { type: integer }
+          nullable: true
+          example: [65805]
+        tech_reg_ids:
+          type: array
+          items: { type: integer }
+          nullable: true
+        groups_id:
+          type: array
+          items: { type: integer }
+          nullable: true
+        single_list_ids:
+          type: array
+          items: { type: integer }
+          nullable: true
+          example: [1528]
+        full_data:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Исходный JSON-документ из реестра ФСА
+        sync_status: { type: string, nullable: true, example: "success" }
+        sync_error: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        last_synced_at: { type: string, format: date-time, nullable: true }
+      required: [id, category, created_at, updated_at]
+
+    Certificate:
+      type: object
+      properties:
+        id: { type: integer }
+        card_id: { type: string, nullable: true }
+        category: { type: string, example: "certificates" }
+        cert_number: { type: string, nullable: true }
+        cert_reg_date: { type: string, format: date-time, nullable: true }
+        cert_end_date: { type: string, format: date-time, nullable: true }
+        applicant_inn: { type: string, nullable: true }
+        status_id: { type: integer, nullable: true }
+        full_data:
+          type: object
+          nullable: true
+          additionalProperties: true
+        sync_status: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [id, category, created_at, updated_at]
+
+  responses:
+    BadRequest:
+      description: Ошибка валидации входных данных
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string, example: "ValidationError" }
+              message: { type: string, example: "Ошибка валидации входных данных" }
+              statusCode: { type: integer, example: 400 }
+              details: { type: array, items: { type: object } }
+    ServerError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string, example: "InternalServerError" }
+              message: { type: string, example: "Внутренняя ошибка сервера" }
+              statusCode: { type: integer, example: 500 }
